@@ -9,9 +9,11 @@ The GitHub workflow detector now runs natively in Rust.
 - Detect suspicious workflow mutations that introduce publish-path compromise
 - Hunt for CI bypass patterns such as `pull_request_target`, `workflow_run`, branch-protection tampering, and security-check suppression
 - Flag TanStack-style cache poisoning where `pull_request_target` runs fork PR code through dependency cache/setup paths later reused by privileged release workflows
+- Flag attacker mechanics around persisted checkout/Git credentials, sensitive artifact/cache paths, remote script pipes, encoded payload execution, dynamic `actions/github-script`, Docker socket exposure, and untrusted branch/ref interpolation
 - Flag prompt-injection surfaces where agents operate on untrusted PR or comment material with write-capable credentials
 - Resolve GitHub workflow `uses:` dependencies and score mutable third-party action or reusable workflow refs in privileged workflows
 - Detect GitHub Action definition compromise, including `action.yml` changes that replace container actions with composite actions running remote installer scripts
+- Inspect npm package tarballs for TanStack-style manifest and payload indicators such as GitHub optionalDependency payload commits, hidden root JavaScript, runner-memory OIDC harvesting, and Session exfiltration endpoints
 - Detect developer-environment persistence such as Claude/VS Code startup hooks that auto-run repository bootstrap scripts
 - Preserve forensic cleanup evidence, including commits that remove OIDC/registry token printing from privileged workflows
 - Flag documented campaign shapes such as mutable references to compromised actions, pwn-request workflows, and secret-exfiltration workflows that post explicit secrets to external endpoints
@@ -83,6 +85,14 @@ Explain the detection model:
 cargo run -- github-workflows detections --show-factors
 ```
 
+Inspect an npm package tarball or package version:
+
+```bash
+cargo run -- npm-packages inspect --tarball /path/to/history-1.161.9.tgz \
+  --show-evidence \
+  --explain
+```
+
 Inspect a known commit directly:
 
 ```bash
@@ -97,4 +107,4 @@ cargo run -- github-workflows hunt \
 
 - Expand the known-compromised-action catalog and add persisted ref-drift history across scans
 - Add continuous capture for transient public workflow changes and short-lived malicious repos
-- Add regression fixtures so future rule changes can be checked against known Bitwarden, Deno, prompt-injection, and developer-environment persistence cases
+- Add campaign-level fixtures so future rule changes can be checked against known Bitwarden, Deno, TanStack, Checkmarx, cap-js, prompt-injection, and developer-environment persistence cases

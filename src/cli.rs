@@ -3,6 +3,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::detection_model::{DETECTION_FAMILIES, FACTOR_MODEL};
 use crate::github_workflows;
+use crate::npm_packages;
 use crate::presets::{
     MessagePreset, PresetMeta, WorkflowPreset, iter_message_presets, iter_workflow_presets,
 };
@@ -22,6 +23,7 @@ impl Cli {
     pub fn run(self) -> Result<i32> {
         match self.command {
             TopLevelCommand::GithubWorkflows(command) => command.run(),
+            TopLevelCommand::NpmPackages(command) => command.run(),
         }
     }
 }
@@ -30,6 +32,8 @@ impl Cli {
 enum TopLevelCommand {
     /// Hunt suspicious GitHub workflow mutations and CI compromise paths.
     GithubWorkflows(GithubWorkflowCommand),
+    /// Inspect npm package tarballs for supply-chain compromise indicators.
+    NpmPackages(NpmPackageCommand),
 }
 
 #[derive(Subcommand)]
@@ -57,6 +61,26 @@ impl GithubWorkflowCommand {
             GithubWorkflowAction::Scan(args) => args.run(),
             GithubWorkflowAction::Presets(args) => args.run(),
             GithubWorkflowAction::Detections(args) => args.run(),
+        }
+    }
+}
+
+#[derive(Subcommand)]
+enum NpmPackageAction {
+    /// Inspect npm package specs, tarball URLs, or local .tgz files.
+    Inspect(NpmPackageInspectArgs),
+}
+
+#[derive(Args)]
+struct NpmPackageCommand {
+    #[command(subcommand)]
+    action: NpmPackageAction,
+}
+
+impl NpmPackageCommand {
+    fn run(self) -> Result<i32> {
+        match self.action {
+            NpmPackageAction::Inspect(args) => args.run(),
         }
     }
 }
@@ -348,5 +372,35 @@ impl GithubWorkflowScanArgs {
             seed_commit_search: Vec::new(),
             seed_path: Vec::new(),
         })
+    }
+}
+
+#[derive(Args)]
+pub(crate) struct NpmPackageInspectArgs {
+    /// npm package spec such as @scope/name@1.2.3. Version defaults to latest.
+    pub(crate) package_specs: Vec<String>,
+    /// Tarball URL or local .tgz path to inspect; repeatable.
+    #[arg(long = "tarball")]
+    pub(crate) tarballs: Vec<String>,
+    /// Minimum score to emit.
+    #[arg(long, default_value_t = 4)]
+    pub(crate) min_score: i32,
+    /// Emit JSON lines.
+    #[arg(long)]
+    pub(crate) json: bool,
+    /// Print relevant manifest and tarball evidence.
+    #[arg(long)]
+    pub(crate) show_evidence: bool,
+    /// Explain why each finding was emitted.
+    #[arg(long)]
+    pub(crate) explain: bool,
+}
+
+impl NpmPackageInspectArgs {
+    fn run(self) -> Result<i32> {
+        if self.package_specs.is_empty() && self.tarballs.is_empty() {
+            bail!("provide at least one package spec or --tarball");
+        }
+        npm_packages::run_inspect(self)
     }
 }

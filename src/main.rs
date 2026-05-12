@@ -2,6 +2,7 @@ mod cli;
 mod detection_model;
 mod github_actions;
 mod github_workflows;
+mod npm_packages;
 mod presets;
 
 use anyhow::Result;

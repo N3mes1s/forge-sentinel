@@ -38,6 +38,7 @@ Track documented attack patterns:
 - flag GhostAction/Shai-Hulud style workflows that exfiltrate explicit secrets to external endpoints
 - strengthen pwn-request coverage for `pull_request_target` workflows that checkout and execute fork PR code
 - detect TanStack-style cache poisoning where fork PR code in `pull_request_target` mutates dependency caches restored by later release workflows
+- detect credential persistence, sensitive artifact/cache leakage, remote/encoded payload execution, dynamic GitHub Script execution, Docker socket exposure, and untrusted ref-name shell interpolation as attacker primitives
 - preserve cleanup/root-cause evidence when later commits remove OIDC or registry token printing
 
 ## Phase 2.7
@@ -57,6 +58,15 @@ Add transient capture:
 - ingest public push and workflow metadata continuously
 - snapshot suspicious workflow files, diffs, and release artifacts before deletion or privatization
 - persist enough evidence to survive GitHub search de-indexing
+
+## Phase 3.5
+
+Add package-content forensics:
+
+- inspect npm tarballs directly from Rust, without adding Python to the detector path
+- flag TanStack-style optionalDependency GitHub payload commits and hidden root JavaScript payloads
+- detect package contents that harvest runner memory, npm OIDC tokens, cloud credentials, kube tokens, npmrc, git credentials, or SSH keys
+- keep package-level evidence tied back to workflow root-cause findings when both are available
 
 ## Phase 4
 

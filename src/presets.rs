@@ -25,11 +25,14 @@ pub enum WorkflowPreset {
     CiSecretExfiltration,
     CiUnpinnedThirdPartyActions,
     CiCachePoisoning,
+    CiCredentialPersistence,
+    CiSensitiveArtifactLeakage,
+    CiEncodedRemotePayloads,
     DeveloperEnvironmentAutorun,
 }
 
 impl WorkflowPreset {
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 21] = [
         Self::NpmLocalArchive,
         Self::NpmManualOidc,
         Self::NpmTokenExposure,
@@ -47,6 +50,9 @@ impl WorkflowPreset {
         Self::CiSecretExfiltration,
         Self::CiUnpinnedThirdPartyActions,
         Self::CiCachePoisoning,
+        Self::CiCredentialPersistence,
+        Self::CiSensitiveArtifactLeakage,
+        Self::CiEncodedRemotePayloads,
         Self::DeveloperEnvironmentAutorun,
     ];
 }
@@ -71,6 +77,9 @@ impl PresetMeta for WorkflowPreset {
             Self::CiSecretExfiltration => "ci-secret-exfiltration",
             Self::CiUnpinnedThirdPartyActions => "ci-unpinned-third-party-actions",
             Self::CiCachePoisoning => "ci-cache-poisoning",
+            Self::CiCredentialPersistence => "ci-credential-persistence",
+            Self::CiSensitiveArtifactLeakage => "ci-sensitive-artifact-leakage",
+            Self::CiEncodedRemotePayloads => "ci-encoded-remote-payloads",
             Self::DeveloperEnvironmentAutorun => "developer-environment-autorun",
         }
     }
@@ -127,6 +136,15 @@ impl PresetMeta for WorkflowPreset {
             }
             Self::CiCachePoisoning => {
                 "Seed pull_request_target workflows that can poison dependency caches across trust boundaries."
+            }
+            Self::CiCredentialPersistence => {
+                "Seed workflows that persist Git or checkout credentials in privileged contexts."
+            }
+            Self::CiSensitiveArtifactLeakage => {
+                "Seed workflows that upload or cache credential-bearing files."
+            }
+            Self::CiEncodedRemotePayloads => {
+                "Seed workflows that execute remote, encoded, or dynamic payloads."
             }
             Self::DeveloperEnvironmentAutorun => {
                 "Seed Claude and editor startup hooks that auto-run repository code."
@@ -232,6 +250,24 @@ impl PresetMeta for WorkflowPreset {
                 "\"pull_request_target\" \"refs/pull\" \"actions/cache\" path:.github/workflows",
                 "\"pull_request_target\" \".github/setup@main\" path:.github/workflows",
                 "\"pull_request_target\" \"skipRemoteCache\" path:.github/workflows",
+            ],
+            Self::CiCredentialPersistence => &[
+                "\"persist-credentials: true\" \"pull_request_target\" path:.github/workflows",
+                "\"git config\" \"insteadOf\" \"GITHUB_TOKEN\" path:.github/workflows",
+                "\"gh auth setup-git\" path:.github/workflows",
+                "\"git credential approve\" path:.github/workflows",
+            ],
+            Self::CiSensitiveArtifactLeakage => &[
+                "\"actions/upload-artifact\" \".npmrc\" path:.github/workflows",
+                "\"actions/upload-artifact\" \".env\" path:.github/workflows",
+                "\"actions/cache\" \".docker/config.json\" path:.github/workflows",
+                "\"actions/cache\" \".aws/credentials\" path:.github/workflows",
+            ],
+            Self::CiEncodedRemotePayloads => &[
+                "\"curl\" \"| bash\" path:.github/workflows",
+                "\"base64 -d\" \"| bash\" path:.github/workflows",
+                "\"EncodedCommand\" path:.github/workflows",
+                "\"actions/github-script\" \"child_process\" path:.github/workflows",
             ],
             Self::DeveloperEnvironmentAutorun => &[
                 "\"SessionStart\" \"node .vscode/setup.mjs\" path:.claude/settings.json",
