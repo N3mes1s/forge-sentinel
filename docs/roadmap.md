@@ -37,6 +37,7 @@ Track documented attack patterns:
 - maintain a conservative catalog of publicly compromised GitHub Action repositories
 - flag GhostAction/Shai-Hulud style workflows that exfiltrate explicit secrets to external endpoints
 - strengthen pwn-request coverage for `pull_request_target` workflows that checkout and execute fork PR code
+- detect TanStack-style cache poisoning where fork PR code in `pull_request_target` mutates dependency caches restored by later release workflows
 - preserve cleanup/root-cause evidence when later commits remove OIDC or registry token printing
 
 ## Phase 2.7

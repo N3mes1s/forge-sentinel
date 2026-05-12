@@ -24,11 +24,12 @@ pub enum WorkflowPreset {
     CiScriptInjection,
     CiSecretExfiltration,
     CiUnpinnedThirdPartyActions,
+    CiCachePoisoning,
     DeveloperEnvironmentAutorun,
 }
 
 impl WorkflowPreset {
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::NpmLocalArchive,
         Self::NpmManualOidc,
         Self::NpmTokenExposure,
@@ -45,6 +46,7 @@ impl WorkflowPreset {
         Self::CiScriptInjection,
         Self::CiSecretExfiltration,
         Self::CiUnpinnedThirdPartyActions,
+        Self::CiCachePoisoning,
         Self::DeveloperEnvironmentAutorun,
     ];
 }
@@ -68,6 +70,7 @@ impl PresetMeta for WorkflowPreset {
             Self::CiScriptInjection => "ci-script-injection",
             Self::CiSecretExfiltration => "ci-secret-exfiltration",
             Self::CiUnpinnedThirdPartyActions => "ci-unpinned-third-party-actions",
+            Self::CiCachePoisoning => "ci-cache-poisoning",
             Self::DeveloperEnvironmentAutorun => "developer-environment-autorun",
         }
     }
@@ -121,6 +124,9 @@ impl PresetMeta for WorkflowPreset {
             }
             Self::CiUnpinnedThirdPartyActions => {
                 "Seed privileged workflows that rely on mutable third-party action refs."
+            }
+            Self::CiCachePoisoning => {
+                "Seed pull_request_target workflows that can poison dependency caches across trust boundaries."
             }
             Self::DeveloperEnvironmentAutorun => {
                 "Seed Claude and editor startup hooks that auto-run repository code."
@@ -220,6 +226,12 @@ impl PresetMeta for WorkflowPreset {
                 "\"reviewdog/action-setup\" path:.github/workflows",
                 "\"aquasecurity/trivy-action\" path:.github/workflows",
                 "\"aquasecurity/setup-trivy\" path:.github/workflows",
+            ],
+            Self::CiCachePoisoning => &[
+                "\"pull_request_target\" \"refs/pull\" \"pnpm\" path:.github/workflows",
+                "\"pull_request_target\" \"refs/pull\" \"actions/cache\" path:.github/workflows",
+                "\"pull_request_target\" \".github/setup@main\" path:.github/workflows",
+                "\"pull_request_target\" \"skipRemoteCache\" path:.github/workflows",
             ],
             Self::DeveloperEnvironmentAutorun => &[
                 "\"SessionStart\" \"node .vscode/setup.mjs\" path:.claude/settings.json",

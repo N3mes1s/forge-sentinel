@@ -150,6 +150,18 @@ pub(crate) const FACTOR_MODEL: &[FactorMeta] = &[
         description: "A pull_request_target workflow checks out PR head code and runs build/test/install commands.",
     },
     FactorMeta {
+        name: "pull_request_target_cache_poisoning_surface",
+        family: "ci-privilege-bypass",
+        kind: FactorKind::Core,
+        description: "A pull_request_target job checks out fork PR merge code, restores/saves dependency cache state, and runs package build code.",
+    },
+    FactorMeta {
+        name: "removes_pull_request_target_cache_poisoning_surface",
+        family: "suppression",
+        kind: FactorKind::Core,
+        description: "A later workflow change removes a pull_request_target cache-poisoning surface; useful as remediation evidence.",
+    },
+    FactorMeta {
         name: "workflow_run_artifact_with_write_or_publish_capability",
         family: "ci-privilege-bypass",
         kind: FactorKind::Core,
@@ -370,6 +382,30 @@ pub(crate) const FACTOR_MODEL: &[FactorMeta] = &[
         family: "ci-privilege-bypass",
         kind: FactorKind::Context,
         description: "The workflow checks out PR head code from a privileged trigger context.",
+    },
+    FactorMeta {
+        name: "checks_out_pr_merge_ref_in_privileged_context",
+        family: "ci-privilege-bypass",
+        kind: FactorKind::Context,
+        description: "The workflow checks out refs/pull/<number>/merge or head from a pull_request_target context.",
+    },
+    FactorMeta {
+        name: "uses_cache_or_setup_action_in_untrusted_pr_job",
+        family: "ci-privilege-bypass",
+        kind: FactorKind::Context,
+        description: "The untrusted PR job uses actions/cache or a setup action likely to restore/save dependency caches.",
+    },
+    FactorMeta {
+        name: "executes_package_build_in_untrusted_pr_context",
+        family: "ci-privilege-bypass",
+        kind: FactorKind::Context,
+        description: "The untrusted PR job runs package install/build/test commands that can execute fork-controlled code.",
+    },
+    FactorMeta {
+        name: "removes_pull_request_target",
+        family: "suppression",
+        kind: FactorKind::Mitigation,
+        description: "The workflow removes a pull_request_target trigger.",
     },
     FactorMeta {
         name: "adds_workflow_run_trigger",

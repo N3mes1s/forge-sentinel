@@ -91,9 +91,21 @@ static OIDC_TOKEN_RE: Lazy<Regex> = Lazy::new(|| {
     )
 });
 static PR_TARGET_RE: Lazy<Regex> = Lazy::new(|| re(r"(?im)^\+\s*pull_request_target:\s*$"));
+static PULL_REQUEST_RE: Lazy<Regex> = Lazy::new(|| re(r"(?im)^\+\s*pull_request:\s*$"));
 static PR_HEAD_CHECKOUT_RE: Lazy<Regex> = Lazy::new(|| {
     re(
         r#"(?im)^\+.*(github\.event\.pull_request\.head\.(sha|ref)|ref:\s*['"]?\$\{\{\s*github\.event\.pull_request\.head\.(sha|ref)\s*\}\})"#,
+    )
+});
+static PR_MERGE_REF_CHECKOUT_RE: Lazy<Regex> = Lazy::new(|| {
+    re(
+        r#"(?im)^\+.*(refs/pull/\$?\{\{?\s*github\.event\.pull_request\.number\s*\}?\}?/(merge|head)|refs/pull/[0-9]+/(merge|head))"#,
+    )
+});
+static REMOVED_PR_TARGET_RE: Lazy<Regex> = Lazy::new(|| re(r"(?im)^-\s*pull_request_target:\s*$"));
+static REMOVED_PR_MERGE_REF_CHECKOUT_RE: Lazy<Regex> = Lazy::new(|| {
+    re(
+        r#"(?im)^-.*(refs/pull/\$?\{\{?\s*github\.event\.pull_request\.number\s*\}?\}?/(merge|head)|refs/pull/[0-9]+/(merge|head))"#,
     )
 });
 static PERSIST_CREDENTIALS_FALSE_RE: Lazy<Regex> =
@@ -204,7 +216,32 @@ static SECRET_ENUMERATION_EXFIL_RE: Lazy<Regex> = Lazy::new(|| {
 });
 static UNTRUSTED_CODE_EXECUTION_RE: Lazy<Regex> = Lazy::new(|| {
     re(
-        r"(?im)^\+.*\b(npm\s+(?:install|ci|test|run)|pnpm\s+(?:install|test|run)|yarn\s+(?:install|test|run)|make(?:\s|$)|cmake|pytest|tox|go\s+test|cargo\s+test|mvn\s+test|gradle\s+test|python\s+[^|;&]+|node\s+[^|;&]+|bash\s+[^|;&]+|sh\s+[^|;&]+|./[A-Za-z0-9_./-]+\.sh)\b",
+        r"(?im)^\+.*\b(npm\s+(?:install|ci|test|run)|pnpm\s+(?:install|test|run|nx\s+run)|yarn\s+(?:install|test|run)|make(?:\s|$)|cmake|pytest|tox|go\s+test|cargo\s+test|mvn\s+test|gradle\s+test|python\s+[^|;&]+|node\s+[^|;&]+|bash\s+[^|;&]+|sh\s+[^|;&]+|./[A-Za-z0-9_./-]+\.sh)\b",
+    )
+});
+static REMOVED_UNTRUSTED_CODE_EXECUTION_RE: Lazy<Regex> = Lazy::new(|| {
+    re(
+        r"(?im)^-.*\b(npm\s+(?:install|ci|test|run)|pnpm\s+(?:install|test|run|nx\s+run)|yarn\s+(?:install|test|run)|make(?:\s|$)|cmake|pytest|tox|go\s+test|cargo\s+test|mvn\s+test|gradle\s+test|python\s+[^|;&]+|node\s+[^|;&]+|bash\s+[^|;&]+|sh\s+[^|;&]+|./[A-Za-z0-9_./-]+\.sh)\b",
+    )
+});
+static CACHE_OR_SETUP_ACTION_RE: Lazy<Regex> = Lazy::new(|| {
+    re(
+        r"(?im)^\+.*(actions/cache@|\.github/(setup|actions/setup)@|pnpm-store|npm-store|yarn-cache|cache-dependency-path)",
+    )
+});
+static CACHE_OR_SETUP_CONTEXT_RE: Lazy<Regex> = Lazy::new(|| {
+    re(
+        r"(?im)(actions/cache@|\.github/(setup|actions/setup)@|pnpm-store|npm-store|yarn-cache|cache-dependency-path)",
+    )
+});
+static REMOVED_CACHE_OR_SETUP_ACTION_RE: Lazy<Regex> = Lazy::new(|| {
+    re(
+        r"(?im)^-.*(actions/cache@|\.github/(setup|actions/setup)@|pnpm-store|npm-store|yarn-cache|cache-dependency-path)",
+    )
+});
+static PR_TARGET_CACHE_POISONING_REMEDIATION_CONTEXT_RE: Lazy<Regex> = Lazy::new(|| {
+    re(
+        r"(?i)(checks out PR merge code|untrusted with read-only permissions|split trust boundaries|limited write access|dependency cache|cache poisoning|refs/pull/.+/(merge|head)|skipRemoteCache)",
     )
 });
 static RUNNER_MEMORY_SECRET_RE: Lazy<Regex> = Lazy::new(|| {
@@ -347,6 +384,8 @@ const CORE_WORKFLOW_FACTORS: &[&str] = &[
     "action_manifest_remote_script_execution",
     "security_workflow_removed_with_action_manifest_change",
     "agent_instruction_file_with_action_manifest_change",
+    "pull_request_target_cache_poisoning_surface",
+    "removes_pull_request_target_cache_poisoning_surface",
     "agent_or_editor_startup_hook_executes_repo_code",
     "agent_runtime_bootstrap_executes_local_payload",
     "agent_autorun_bootstrap_chain",
@@ -1533,6 +1572,33 @@ fn has_pull_request_target_untrusted_code_mitigation(added_lines: &str) -> bool 
     removes_default_permissions && (gates_fork_execution || sanitizes_cross_job_artifact)
 }
 
+fn diff_lines_with_prefix(patch: &str, prefix: char) -> String {
+    patch
+        .lines()
+        .filter(|line| line.starts_with(prefix))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn has_pull_request_target_cache_poisoning_remediation_context(
+    patch: &str,
+    added_lines: &str,
+    removed_lines: &str,
+) -> bool {
+    let removes_pr_merge_ref_checkout = REMOVED_PR_MERGE_REF_CHECKOUT_RE.is_match(removed_lines);
+    let removes_untrusted_code_execution =
+        REMOVED_UNTRUSTED_CODE_EXECUTION_RE.is_match(removed_lines);
+    let removes_cache_or_setup_action = REMOVED_CACHE_OR_SETUP_ACTION_RE.is_match(removed_lines);
+
+    let structural_remediation = removes_pr_merge_ref_checkout
+        && removes_untrusted_code_execution
+        && (removes_cache_or_setup_action || CACHE_OR_SETUP_CONTEXT_RE.is_match(patch));
+    let documented_trigger_replacement = PULL_REQUEST_RE.is_match(added_lines)
+        && PR_TARGET_CACHE_POISONING_REMEDIATION_CONTEXT_RE.is_match(patch);
+
+    structural_remediation || documented_trigger_replacement
+}
+
 fn has_privileged_mutable_third_party_dependency(
     action_uses: &[ActionUse],
     privileged_workflow_capability: bool,
@@ -1671,21 +1737,13 @@ fn analyze_commit(
         });
     }
 
-    let combined_patch = workflow_files
+    let workflow_patches = workflow_files
         .iter()
         .map(|file| patch_for_file(file, repo, sha, parent_sha))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let added_lines = combined_patch
-        .lines()
-        .filter(|line| line.starts_with('+'))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let removed_lines = combined_patch
-        .lines()
-        .filter(|line| line.starts_with('-'))
-        .collect::<Vec<_>>()
-        .join("\n");
+        .collect::<Vec<_>>();
+    let combined_patch = workflow_patches.join("\n");
+    let added_lines = diff_lines_with_prefix(&combined_patch, '+');
+    let removed_lines = diff_lines_with_prefix(&combined_patch, '-');
 
     if show_evidence {
         finding.evidence_added = extract_evidence_lines(&added_lines, "+", 20);
@@ -1736,6 +1794,7 @@ fn analyze_commit(
     let token_exposure = !explicit_token_exposure.is_empty();
     let adds_pull_request_target = PR_TARGET_RE.is_match(&added_lines);
     let checks_out_pr_head = PR_HEAD_CHECKOUT_RE.is_match(&added_lines);
+    let checks_out_pr_merge_ref = PR_MERGE_REF_CHECKOUT_RE.is_match(&added_lines);
     let adds_write_permissions = WRITE_PERMISSIONS_RE.is_match(&added_lines);
     let adds_workflow_run = WORKFLOW_RUN_RE.is_match(&added_lines);
     let downloads_workflow_artifact = WORKFLOW_ARTIFACT_DOWNLOAD_RE.is_match(&added_lines);
@@ -1766,6 +1825,20 @@ fn analyze_commit(
     let suspicious_workflow_file = has_suspicious_workflow_file(&workflow_files)
         || GHOSTACTION_WORKFLOW_NAME_RE.is_match(&added_lines);
     let executes_untrusted_code = UNTRUSTED_CODE_EXECUTION_RE.is_match(&added_lines);
+    let uses_cache_or_setup_action = CACHE_OR_SETUP_ACTION_RE.is_match(&added_lines)
+        || (adds_pull_request_target && CACHE_OR_SETUP_CONTEXT_RE.is_match(&combined_patch));
+    let removes_pull_request_target_cache_poisoning_surface =
+        workflow_patches.iter().any(|patch| {
+            let patch_added_lines = diff_lines_with_prefix(patch, '+');
+            let patch_removed_lines = diff_lines_with_prefix(patch, '-');
+
+            REMOVED_PR_TARGET_RE.is_match(&patch_removed_lines)
+                && has_pull_request_target_cache_poisoning_remediation_context(
+                    patch,
+                    &patch_added_lines,
+                    &patch_removed_lines,
+                )
+        });
     let disables_checkout_credentials = PERSIST_CREDENTIALS_FALSE_RE.is_match(&added_lines);
     let mitigates_pr_target_untrusted_code =
         has_pull_request_target_untrusted_code_mitigation(&added_lines);
@@ -1849,6 +1922,35 @@ fn analyze_commit(
 
     if adds_pull_request_target {
         add_factor(&mut finding, 1, "adds_pull_request_target");
+        if checks_out_pr_merge_ref {
+            add_factor(
+                &mut finding,
+                3,
+                "checks_out_pr_merge_ref_in_privileged_context",
+            );
+        }
+        if uses_cache_or_setup_action {
+            add_factor(
+                &mut finding,
+                2,
+                "uses_cache_or_setup_action_in_untrusted_pr_job",
+            );
+        }
+        if executes_untrusted_code && (checks_out_pr_head || checks_out_pr_merge_ref) {
+            add_factor(
+                &mut finding,
+                2,
+                "executes_package_build_in_untrusted_pr_context",
+            );
+        }
+        if checks_out_pr_merge_ref && executes_untrusted_code && uses_cache_or_setup_action {
+            strong_workflow_signal = true;
+            add_factor(
+                &mut finding,
+                7,
+                "pull_request_target_cache_poisoning_surface",
+            );
+        }
         if checks_out_pr_head {
             add_factor(&mut finding, 3, "checks_out_pr_head_in_privileged_context");
             if executes_untrusted_code && mitigates_pr_target_untrusted_code {
@@ -1879,6 +1981,15 @@ fn analyze_commit(
                 }
             }
         }
+    }
+    if removes_pull_request_target_cache_poisoning_surface {
+        add_factor(&mut finding, 1, "removes_pull_request_target");
+        strong_workflow_signal = true;
+        add_factor(
+            &mut finding,
+            5,
+            "removes_pull_request_target_cache_poisoning_surface",
+        );
     }
 
     if adds_workflow_run {
@@ -2633,18 +2744,22 @@ fn truncate_line(value: &str, max_len: usize) -> String {
 mod tests {
     use super::{
         ACTION_MANIFEST_COMPOSITE_RE, ACTION_MANIFEST_DOCKER_RE, ACTION_MANIFEST_REMOTE_SCRIPT_RE,
-        AGENT_EDITOR_AUTORUN_HOOK_RE, AGENT_RUNTIME_BOOTSTRAP_RE, GHOSTACTION_WORKFLOW_NAME_RE,
-        PERSIST_CREDENTIALS_FALSE_RE, PR_HEAD_CHECKOUT_RE, UNTRUSTED_CODE_EXECUTION_RE,
+        AGENT_EDITOR_AUTORUN_HOOK_RE, AGENT_RUNTIME_BOOTSTRAP_RE, CACHE_OR_SETUP_ACTION_RE,
+        CACHE_OR_SETUP_CONTEXT_RE, GHOSTACTION_WORKFLOW_NAME_RE, PERSIST_CREDENTIALS_FALSE_RE,
+        PR_HEAD_CHECKOUT_RE, PR_MERGE_REF_CHECKOUT_RE, REMOVED_PR_MERGE_REF_CHECKOUT_RE,
+        REMOVED_PR_TARGET_RE, REMOVED_UNTRUSTED_CODE_EXECUTION_RE, UNTRUSTED_CODE_EXECUTION_RE,
         action_ref_changed, action_ref_downgrades_to_mutable, decode_possible_base64,
         explicit_secret_reference_count, has_added_agent_editor_autorun_file,
         has_added_agent_instruction_file, has_added_agent_payload_script,
         has_dependency_manifest_file, has_external_non_github_network_call,
         has_privileged_mutable_reusable_workflow, has_privileged_mutable_third_party_dependency,
-        has_privileged_workflow_capability, has_pull_request_target_untrusted_code_mitigation,
-        has_removed_protective_workflow, has_secret_enumeration_exfil_path,
-        has_suspicious_workflow_file, is_generated_dependency_pin_regen,
-        is_sensitive_automation_file, known_compromised_action_reason, message_secret_evidence,
-        redact_message, redact_secret, removed_token_exposure_lines, token_exposure_lines,
+        has_privileged_workflow_capability,
+        has_pull_request_target_cache_poisoning_remediation_context,
+        has_pull_request_target_untrusted_code_mitigation, has_removed_protective_workflow,
+        has_secret_enumeration_exfil_path, has_suspicious_workflow_file,
+        is_generated_dependency_pin_regen, is_sensitive_automation_file,
+        known_compromised_action_reason, message_secret_evidence, redact_message, redact_secret,
+        removed_token_exposure_lines, token_exposure_lines,
     };
     use crate::github_actions::extract_action_uses;
     use base64::Engine;
@@ -2966,6 +3081,109 @@ mod tests {
         assert!(PR_HEAD_CHECKOUT_RE.is_match(added));
         assert!(UNTRUSTED_CODE_EXECUTION_RE.is_match(added));
         assert!(!PERSIST_CREDENTIALS_FALSE_RE.is_match(added));
+    }
+
+    #[test]
+    fn detects_pull_request_target_cache_poisoning_surface() {
+        let added = r#"
++on:
++  pull_request_target:
++jobs:
++  benchmark-pr:
++    permissions:
++      contents: read
++    steps:
++      - uses: actions/checkout@v6.0.2
++        with:
++          ref: refs/pull/${{ github.event.pull_request.number }}/merge
++          persist-credentials: false
++      - name: Setup Tools
++        uses: tanstack/config/.github/setup@main
++      - run: pnpm nx run @benchmarks/bundle-size:build --outputStyle=stream --skipRemoteCache
+"#;
+        assert!(PR_MERGE_REF_CHECKOUT_RE.is_match(added));
+        assert!(CACHE_OR_SETUP_ACTION_RE.is_match(added));
+        assert!(CACHE_OR_SETUP_CONTEXT_RE.is_match(
+            "+      - name: Setup Tools\n         uses: tanstack/config/.github/setup@main"
+        ));
+        assert!(UNTRUSTED_CODE_EXECUTION_RE.is_match(added));
+    }
+
+    #[test]
+    fn detects_pull_request_target_cache_poisoning_remediation_shape() {
+        let patch = r#"
+-  pull_request_target:
+-    if: github.event_name == 'pull_request_target'
+-          ref: refs/pull/${{ github.event.pull_request.number }}/merge
+-        uses: tanstack/config/.github/setup@main
+-      - run: pnpm nx run @benchmarks/bundle-size:build --outputStyle=stream --skipRemoteCache
+"#;
+        let added = "";
+        let removed = patch
+            .lines()
+            .filter(|line| line.starts_with('-'))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(REMOVED_PR_TARGET_RE.is_match(&removed));
+        assert!(REMOVED_PR_MERGE_REF_CHECKOUT_RE.is_match(&removed));
+        assert!(REMOVED_UNTRUSTED_CODE_EXECUTION_RE.is_match(&removed));
+        assert!(has_pull_request_target_cache_poisoning_remediation_context(
+            patch, added, &removed
+        ));
+    }
+
+    #[test]
+    fn detects_documented_pull_request_target_trigger_replacement_remediation() {
+        let patch = r#"
+@@ -4,7 +4,7 @@ on:
+   # We use `pull_request_target` to split trust boundaries across jobs:
+   # - `benchmark-pr` checks out PR merge code and runs it as untrusted with read-only permissions.
+   # - `comment-pr` runs trusted base-repo code with limited write access to upsert the PR comment.
+-  pull_request_target:
++  pull_request:
+     paths:
+       - 'packages/**'
+"#;
+        let added = patch
+            .lines()
+            .filter(|line| line.starts_with('+'))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let removed = patch
+            .lines()
+            .filter(|line| line.starts_with('-'))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(REMOVED_PR_TARGET_RE.is_match(&removed));
+        assert!(has_pull_request_target_cache_poisoning_remediation_context(
+            patch, &added, &removed
+        ));
+    }
+
+    #[test]
+    fn ignores_broad_pull_request_target_removal_without_cache_poisoning_context() {
+        let patch = r#"
+-  pull_request_target:
++  pull_request:
+-      - run: npm test
+-      - uses: actions/checkout@v4
+"#;
+        let added = patch
+            .lines()
+            .filter(|line| line.starts_with('+'))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let removed = patch
+            .lines()
+            .filter(|line| line.starts_with('-'))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(REMOVED_PR_TARGET_RE.is_match(&removed));
+        assert!(
+            !has_pull_request_target_cache_poisoning_remediation_context(patch, &added, &removed)
+        );
     }
 
     #[test]

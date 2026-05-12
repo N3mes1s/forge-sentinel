@@ -8,6 +8,7 @@ The GitHub workflow detector now runs natively in Rust.
 
 - Detect suspicious workflow mutations that introduce publish-path compromise
 - Hunt for CI bypass patterns such as `pull_request_target`, `workflow_run`, branch-protection tampering, and security-check suppression
+- Flag TanStack-style cache poisoning where `pull_request_target` runs fork PR code through dependency cache/setup paths later reused by privileged release workflows
 - Flag prompt-injection surfaces where agents operate on untrusted PR or comment material with write-capable credentials
 - Resolve GitHub workflow `uses:` dependencies and score mutable third-party action or reusable workflow refs in privileged workflows
 - Detect GitHub Action definition compromise, including `action.yml` changes that replace container actions with composite actions running remote installer scripts
