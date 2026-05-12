@@ -58,12 +58,14 @@ Add transient capture:
 - ingest public push and workflow metadata continuously
 - snapshot suspicious workflow files, diffs, and release artifacts before deletion or privatization
 - persist enough evidence to survive GitHub search de-indexing
+- preserve npm package metadata and emit removed-artifact forensic findings when tarballs disappear before inspection
 
 ## Phase 3.5
 
 Add package-content forensics:
 
 - inspect npm tarballs directly from Rust, without adding Python to the detector path
+- write package metadata, tarball hashes, and finding JSON to an evidence directory for later replay
 - flag TanStack-style optionalDependency GitHub payload commits and hidden root JavaScript payloads
 - detect package contents that harvest runner memory, npm OIDC tokens, cloud credentials, kube tokens, npmrc, git credentials, or SSH keys
 - keep package-level evidence tied back to workflow root-cause findings when both are available

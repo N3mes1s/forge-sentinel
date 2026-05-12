@@ -124,6 +124,12 @@ pub(crate) const FACTOR_MODEL: &[FactorMeta] = &[
         description: "Package contents reference Session/Oxen file-upload infrastructure used for exfiltration.",
     },
     FactorMeta {
+        name: "npm_package_tarball_unavailable_forensics",
+        family: "package-content-compromise",
+        kind: FactorKind::Core,
+        description: "npm metadata for a concrete package version exists, but the referenced tarball could not be fetched for forensic inspection.",
+    },
+    FactorMeta {
         name: "publishes_committed_archive_artifact",
         family: "publish-compromise",
         kind: FactorKind::Core,
@@ -992,6 +998,18 @@ pub(crate) const FACTOR_MODEL: &[FactorMeta] = &[
         family: "package-content-compromise",
         kind: FactorKind::Context,
         description: "A root JavaScript payload is present even though package files metadata does not explicitly include it.",
+    },
+    FactorMeta {
+        name: "npm_package_metadata_snapshot",
+        family: "package-content-compromise",
+        kind: FactorKind::Context,
+        description: "ForgeSentinel captured package metadata for later forensic correlation.",
+    },
+    FactorMeta {
+        name: "npm_package_tarball_snapshot",
+        family: "package-content-compromise",
+        kind: FactorKind::Context,
+        description: "ForgeSentinel captured and hashed the package tarball for later forensic replay.",
     },
     FactorMeta {
         name: "adds_registry_auth_token_handling",

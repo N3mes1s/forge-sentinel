@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use anyhow::{Result, bail};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
@@ -377,11 +379,12 @@ impl GithubWorkflowScanArgs {
 
 #[derive(Args)]
 pub(crate) struct NpmPackageInspectArgs {
-    /// npm package spec such as @scope/name@1.2.3. Version defaults to latest.
-    pub(crate) package_specs: Vec<String>,
     /// Tarball URL or local .tgz path to inspect; repeatable.
     #[arg(long = "tarball")]
     pub(crate) tarballs: Vec<String>,
+    /// npm registry metadata JSON captured earlier; pairs with package specs for offline forensics.
+    #[arg(long = "metadata-file")]
+    pub(crate) metadata_files: Vec<PathBuf>,
     /// Minimum score to emit.
     #[arg(long, default_value_t = 4)]
     pub(crate) min_score: i32,
@@ -394,6 +397,11 @@ pub(crate) struct NpmPackageInspectArgs {
     /// Explain why each finding was emitted.
     #[arg(long)]
     pub(crate) explain: bool,
+    /// Directory where package metadata, tarballs, and findings are snapshotted for forensics.
+    #[arg(long)]
+    pub(crate) evidence_dir: Option<PathBuf>,
+    /// npm package spec such as @scope/name@1.2.3. Version defaults to latest.
+    pub(crate) package_specs: Vec<String>,
 }
 
 impl NpmPackageInspectArgs {

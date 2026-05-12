@@ -89,8 +89,20 @@ Inspect an npm package tarball or package version:
 
 ```bash
 cargo run -- npm-packages inspect --tarball /path/to/history-1.161.9.tgz \
+  --evidence-dir .forge-sentinel/evidence \
   --show-evidence \
   --explain
+```
+
+When `--evidence-dir` is set, ForgeSentinel snapshots package metadata, fetched tarballs, SHA-256 hashes, and findings. If npm metadata still references a concrete package version but the tarball has been removed or cannot be fetched, the inspector emits a forensic finding instead of dropping the case.
+
+For removed packages, pass previously captured npm registry metadata back into the inspector:
+
+```bash
+cargo run -- npm-packages inspect @tanstack/history@1.161.12 \
+  --metadata-file /path/to/tanstack-history-metadata.json \
+  --evidence-dir .forge-sentinel/evidence \
+  --show-evidence
 ```
 
 Inspect a known commit directly:
