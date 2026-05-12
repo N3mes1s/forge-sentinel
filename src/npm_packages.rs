@@ -7,6 +7,7 @@ use anyhow::{Context, Result, bail};
 use flate2::read::GzDecoder;
 use once_cell::sync::Lazy;
 use regex::Regex;
+use reqwest::StatusCode;
 use reqwest::blocking::Client;
 use reqwest::header::{ACCEPT, HeaderMap, HeaderValue, USER_AGENT};
 use serde::Serialize;
@@ -94,6 +95,12 @@ struct PackageFile {
     size: usize,
 }
 
+#[derive(Debug)]
+enum TarballFetchFailure {
+    Unavailable(String),
+    Transient(String),
+}
+
 pub(crate) fn run_inspect(args: NpmPackageInspectArgs) -> Result<i32> {
     let mut findings = Vec::new();
     let evidence_dir = args.evidence_dir.as_deref();
@@ -119,15 +126,21 @@ pub(crate) fn run_inspect(args: NpmPackageInspectArgs) -> Result<i32> {
             findings.push(finding);
             continue;
         }
-        let bytes = match fetch_bytes(&metadata.tarball_url) {
+        let bytes = match fetch_package_tarball(&metadata.tarball_url) {
             Ok(bytes) => bytes,
-            Err(error) => {
+            Err(TarballFetchFailure::Unavailable(error)) => {
                 let mut finding =
-                    unavailable_tarball_finding(&metadata, &error.to_string(), args.show_evidence);
+                    unavailable_tarball_finding(&metadata, &error, args.show_evidence);
                 finding.evidence_files = evidence_files;
                 snapshot_finding(evidence_dir, &finding)?;
                 findings.push(finding);
                 continue;
+            }
+            Err(TarballFetchFailure::Transient(error)) => {
+                bail!(
+                    "fetch npm tarball for {} failed without durable removal evidence: {error}",
+                    metadata.target
+                );
             }
         };
         snapshot_tarball(evidence_dir, &metadata.target, &bytes, &mut evidence_files)?;
@@ -322,6 +335,35 @@ fn fetch_bytes(url: &str) -> Result<Vec<u8>> {
         .error_for_status()
         .with_context(|| format!("request failed for {url}"))?;
     Ok(response.bytes()?.to_vec())
+}
+
+fn fetch_package_tarball(url: &str) -> std::result::Result<Vec<u8>, TarballFetchFailure> {
+    let response = NPM_CLIENT
+        .get(url)
+        .send()
+        .map_err(|error| TarballFetchFailure::Transient(format!("fetch {url}: {error}")))?;
+    classify_tarball_status(url, response.status())?;
+    response
+        .bytes()
+        .map(|bytes| bytes.to_vec())
+        .map_err(|error| TarballFetchFailure::Transient(format!("read {url}: {error}")))
+}
+
+fn classify_tarball_status(
+    url: &str,
+    status: StatusCode,
+) -> std::result::Result<(), TarballFetchFailure> {
+    if matches!(status, StatusCode::NOT_FOUND | StatusCode::GONE) {
+        return Err(TarballFetchFailure::Unavailable(format!(
+            "request failed for {url}: HTTP {status}"
+        )));
+    }
+    if !status.is_success() {
+        return Err(TarballFetchFailure::Transient(format!(
+            "request failed for {url}: HTTP {status}"
+        )));
+    }
+    Ok(())
 }
 
 fn inspect_tarball_bytes(target: &str, bytes: &[u8]) -> Result<PackageSnapshot> {
@@ -702,10 +744,12 @@ fn print_finding(finding: &NpmFinding, explain: bool) {
 #[cfg(test)]
 mod tests {
     use super::{
-        PackageFile, PackageSnapshot, PackageVersionMetadata, analyze_package, metadata_for_spec,
-        package_evidence_dir, parse_package_spec, resolve_package_spec_from_metadata, sha256_hex,
-        snapshot_metadata, snapshot_raw_tarball, unavailable_tarball_finding,
+        PackageFile, PackageSnapshot, PackageVersionMetadata, TarballFetchFailure, analyze_package,
+        classify_tarball_status, metadata_for_spec, package_evidence_dir, parse_package_spec,
+        resolve_package_spec_from_metadata, sha256_hex, snapshot_metadata, snapshot_raw_tarball,
+        unavailable_tarball_finding,
     };
+    use reqwest::StatusCode;
     use serde_json::{Value, json};
     use std::fs;
 
@@ -864,6 +908,28 @@ mod tests {
                 .any(|item| item.contains("publish_time"))
         );
         assert!(finding.evidence.iter().any(|item| item.contains("gitHead")));
+    }
+
+    #[test]
+    fn classifies_only_durable_tarball_removal_as_unavailable() {
+        assert!(classify_tarball_status("https://example.test/pkg.tgz", StatusCode::OK).is_ok());
+
+        let not_found =
+            classify_tarball_status("https://example.test/pkg.tgz", StatusCode::NOT_FOUND)
+                .expect_err("404 should be unavailable evidence");
+        assert!(matches!(not_found, TarballFetchFailure::Unavailable(_)));
+
+        let timeout_like =
+            classify_tarball_status("https://example.test/pkg.tgz", StatusCode::GATEWAY_TIMEOUT)
+                .expect_err("gateway timeout should stay transient");
+        assert!(matches!(timeout_like, TarballFetchFailure::Transient(_)));
+
+        let rate_limit = classify_tarball_status(
+            "https://example.test/pkg.tgz",
+            StatusCode::TOO_MANY_REQUESTS,
+        )
+        .expect_err("rate limit should stay transient");
+        assert!(matches!(rate_limit, TarballFetchFailure::Transient(_)));
     }
 
     #[test]
